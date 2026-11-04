@@ -280,7 +280,7 @@ func TestPinnedWorkerLoopDoesNotConsultTaskRouterAndReportsFailureOnce(t *testin
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		e.workerLoop(ctx, task, WorkerSlot{Name: "work#4", ProfileID: 12})
+		e.workerLoop(ctx, task, WorkerSlot{Name: "work#4", ProfileID: 12}, &taskWorkerPool{desired: map[string]int64{"work#4": 12}})
 		close(done)
 	}()
 	time.Sleep(100 * time.Millisecond)

@@ -3678,6 +3678,7 @@ func (s *Server) settingsPayload() map[string]any {
 		"brave_key_set":                        strings.TrimSpace(braveKey) != "",
 		"tavily_key_set":                       strings.TrimSpace(tavilyKey) != "",
 		"deepseek_search_key_set":              s.m.deepSeekSearchKey() != "",
+		"deepseek_search_base_url":             s.m.deepSeekSearchBaseURL(),
 		"web_search_proxy":                     maskSecrets(proxy),             // 独立出口代理(http/https/socks5)，空=直连
 		"global_proxy":                         maskSecrets(s.m.GlobalProxy()), // 全局出口代理(http/https/socks5)，所有目标流量走它，空=直连
 		"proxy_pool":                           func() []ProxyPoolEntry { e, _, _ := s.m.ProxyPoolSnapshot(); return e }(),
@@ -3779,6 +3780,7 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		BraveKey               *string       `json:"brave_search_api_key"`
 		TavilyKey              *string       `json:"tavily_search_api_key"`
 		DeepSeekSearchKey      *string       `json:"deepseek_search_api_key"`
+		DeepSeekSearchBaseURL  *string       `json:"deepseek_search_base_url"`
 		WebSearchProxy         *string       `json:"web_search_proxy"` // 独立出口代理(http/https/socks5)；null=不改，""=清空
 		GlobalProxy            *string       `json:"global_proxy"`     // 全局出口代理(http/https/socks5)；null=不改，""=清空(直连)
 		ProxyRotateTimed       *bool         `json:"proxy_rotate_timed_enabled"`
@@ -3815,6 +3817,12 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, err.Error())
 		return
+	}
+	if req.DeepSeekSearchBaseURL != nil {
+		if _, err := agent.DeepSeekToolsBaseURL(*req.DeepSeekSearchBaseURL); err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	if req.ConstraintsInjectPlanner != nil {
 		if err := s.m.pg.SetBool(settingConstraintsInjectPlanner, *req.ConstraintsInjectPlanner); err != nil {
@@ -4085,6 +4093,14 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		changed = true
 	}
+	if req.DeepSeekSearchBaseURL != nil {
+		base := strings.TrimSpace(*req.DeepSeekSearchBaseURL)
+		if err := s.m.pg.SetSetting(settingDeepSeekSearchBaseURL, base); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		changed = true
+	}
 	if req.DeepSeekSearchKey != nil {
 		if strings.Contains(*req.DeepSeekSearchKey, "***") {
 			*req.DeepSeekSearchKey = s.m.deepSeekSearchKey()
@@ -4150,11 +4166,12 @@ func (s *Server) setReporterBrowserScreenshotVisibility(enabled bool) error {
 // not retype them. Always 200 with {ok, error?, count?, backend?}.
 func (s *Server) testWebSearch(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Backend           string `json:"web_search_backend"`
-		Proxy             string `json:"web_search_proxy"`
-		BraveKey          string `json:"brave_search_api_key"`
-		TavilyKey         string `json:"tavily_search_api_key"`
-		DeepSeekSearchKey string `json:"deepseek_search_api_key"`
+		Backend               string  `json:"web_search_backend"`
+		Proxy                 string  `json:"web_search_proxy"`
+		BraveKey              string  `json:"brave_search_api_key"`
+		TavilyKey             string  `json:"tavily_search_api_key"`
+		DeepSeekSearchKey     string  `json:"deepseek_search_api_key"`
+		DeepSeekSearchBaseURL *string `json:"deepseek_search_base_url"`
 	}
 	// Empty body is fine — fall back entirely to the saved config below.
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
@@ -4188,7 +4205,11 @@ func (s *Server) testWebSearch(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(backend) == deepSeekWebSearchBackend {
 		ctx, cancel := context.WithTimeout(r.Context(), wall)
 		defer cancel()
-		count, err := agent.DeepSeekSearchProbe(ctx, deepSeekKey, proxy, "DeepSeek company official website", 3)
+		base := s.m.deepSeekSearchBaseURL()
+		if req.DeepSeekSearchBaseURL != nil {
+			base = *req.DeepSeekSearchBaseURL
+		}
+		count, err := agent.DeepSeekSearchProbe(ctx, base, deepSeekKey, proxy, "DeepSeek company official website", 3)
 		if err != nil {
 			writeJSON(w, 200, map[string]any{"ok": false, "error": err.Error(), "backend": backend})
 			return

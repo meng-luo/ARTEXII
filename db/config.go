@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
+
+	"github.com/Autumn-27/artex/llmhttp"
 )
 
 // ---------- LLM profiles ----------
@@ -167,9 +170,19 @@ func (d *DB) SaveProfile(p *LLMProfile) (int64, error) {
 			return 0, ErrJevProfileJudgeOnly
 		}
 	}
+	keys := llmhttp.APIKeys(p.APIKey)
+	p.APIKey = strings.Join(keys, "\n")
 	hint := p.APIKeyHint
-	if len(p.APIKey) >= 4 {
-		hint = "…" + p.APIKey[len(p.APIKey)-4:]
+	if len(keys) > 0 {
+		hints := make([]string, 0, len(keys))
+		for _, key := range keys {
+			hint := "***"
+			if len(key) > 4 {
+				hint = "…" + key[len(key)-4:]
+			}
+			hints = append(hints, hint)
+		}
+		hint = strings.Join(hints, ", ")
 	}
 	r := p.Retry.Clamped()
 	if p.ID == 0 {

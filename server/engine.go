@@ -150,7 +150,7 @@ type Engine struct {
 	resolveAuthoritative bool
 	workerResolve        func(t *Task, slot WorkerSlot) (*agent.Worker, error)
 	slotState            sync.Map // task/slot -> slotAvailability
-	slotPlans            sync.Map // task -> map[slot name]profile ID; immutable for a run
+	slotPlans            sync.Map // task -> immutable snapshot of slot name/profile ID
 	// readiness reports whether a global LLM provider is configured — the signal behind
 	// Ready()/the llm_configured indicator. Wired once at startup; nil → not ready.
 	readiness    func() bool
@@ -811,7 +811,7 @@ func (e *Engine) Run(ctx context.Context, t *Task) {
 		t.Notify() // already running — just nudge a planning round
 		return
 	}
-	rt := e.registerTaskRoutines(ctx, t.ID, 1+len(slots))
+	rt := e.registerTaskRoutines(ctx, t.ID, 2)
 	plan := make(map[string]int64, len(slots))
 	for _, slot := range slots {
 		plan[slot.Name] = slot.ProfileID
@@ -820,10 +820,7 @@ func (e *Engine) Run(ctx context.Context, t *Task) {
 	e.deleteMu.RUnlock()
 	e.touch(t.ID)
 	runTaskRoutine(rt, func(loopCtx context.Context) { e.plannerLoop(loopCtx, t) })
-	for _, slot := range slots {
-		slot := slot
-		runTaskRoutine(rt, func(loopCtx context.Context) { e.workerLoop(loopCtx, t, slot) })
-	}
+	runTaskRoutine(rt, func(loopCtx context.Context) { e.workerPoolLoop(loopCtx, t, slots) })
 	e.startDeadlineCoordinator(ctx, t) // 任务级超时定时器(仅 timeout>0;去重)
 	// 仅在「完全没有活动意图(open+running)」时才 kick 首轮规划。带种子意图的任务:种子已
 	// 是 open,或已被上面刚起的 worker 抢先 claim 成 running——两种都算「有活干」,一律跳过
@@ -838,20 +835,21 @@ func (e *Engine) Run(ctx context.Context, t *Task) {
 // workerSlotsForTask preserves an explicit task concurrency override. Tasks
 // using the global default inherit its model pools and their pinned profiles.
 func workerSlotsForTask(t *Task, pools []WorkerPool, global int) ([]WorkerSlot, error) {
-	if t != nil && t.WorkerCount > 0 {
+	if t != nil && t.lifecycleSnapshot().WorkerCount > 0 {
 		return ExpandWorkerSlots(nil, workerCountForTask(t, global))
 	}
 	return ExpandWorkerSlots(pools, global)
 }
 
 func workerCountForTask(t *Task, global int) int {
-	if t != nil && t.WorkerCount > 0 {
+	count := t.lifecycleSnapshot().WorkerCount
+	if count > 0 {
 		// Direct database edits can bypass validation; cap those values so the
 		// engine never starts more than the supported per-task worker count.
-		if t.WorkerCount > db.MaxTaskWorkerCount {
+		if count > db.MaxTaskWorkerCount {
 			return db.MaxTaskWorkerCount
 		}
-		return t.WorkerCount
+		return count
 	}
 	return global
 }
@@ -1004,13 +1002,16 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 	}
 }
 
-func (e *Engine) workerLoop(ctx context.Context, t *Task, slot WorkerSlot) {
+func (e *Engine) workerLoop(ctx context.Context, t *Task, slot WorkerSlot, pool *taskWorkerPool) {
 	name := slot.Name
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
+		}
+		if !pool.contains(slot) {
+			return
 		}
 		var worker *agent.Worker
 		var resolveErr error
@@ -1060,7 +1061,15 @@ func (e *Engine) workerLoop(ctx context.Context, t *Task, slot WorkerSlot) {
 		if !e.beginTaskOperation(t.ID) {
 			return
 		}
+		if !pool.acquire(slot) {
+			e.decInflight(t.ID)
+			if sleepCtx(ctx, 100*time.Millisecond) {
+				return
+			}
+			continue
+		}
 		claimed := e.runWorkerStep(ctx, t, name, worker)
+		pool.release()
 		e.decInflight(t.ID)
 		if !claimed && sleepCtx(ctx, 800*time.Millisecond) {
 			return

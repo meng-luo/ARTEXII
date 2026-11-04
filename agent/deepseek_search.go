@@ -16,12 +16,36 @@ import (
 
 const deepSeekToolsURL = "https://api.deepseek.com/v1/tools/"
 
+// DeepSeekToolsBaseURL accepts a server root, /v1 root, or full tools base.
+func DeepSeekToolsBaseURL(base string) (string, error) {
+	base = strings.TrimRight(strings.TrimSpace(base), "/")
+	if base == "" {
+		return deepSeekToolsURL, nil
+	}
+	u, err := url.Parse(base)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+		return "", fmt.Errorf("DeepSeek Search Base URL 必须是有效的 HTTP(S) 地址")
+	}
+	switch {
+	case strings.HasSuffix(base, "/tools"):
+		return base + "/", nil
+	case strings.HasSuffix(base, "/v1"):
+		return base + "/tools/", nil
+	default:
+		return base + "/v1/tools/", nil
+	}
+}
+
 func deepSeekTools(opts WebSearchOpts) []actool.CoreTool {
 	if !opts.Enabled || opts.Backend != "deepseek" {
 		return nil
 	}
 	key := strings.TrimSpace(opts.DeepSeekAPIKey)
 	if key == "" {
+		return nil
+	}
+	base, err := DeepSeekToolsBaseURL(opts.DeepSeekBaseURL)
+	if err != nil {
 		return nil
 	}
 	client := &http.Client{Timeout: 30 * time.Second}
@@ -33,19 +57,23 @@ func deepSeekTools(opts WebSearchOpts) []actool.CoreTool {
 		}
 	}
 	return []actool.CoreTool{
-		deepSeekTool("deepseek_search", "Search the web with DeepSeek and return ranked titles, URLs, and snippets.", "search", key, client, map[string]any{
+		deepSeekTool("deepseek_search", "Search the web with DeepSeek and return ranked titles, URLs, and snippets.", base+"search", key, client, map[string]any{
 			"query": map[string]any{"type": "string", "description": "Search query"},
 			"count": map[string]any{"type": "integer", "description": "Maximum results (1-10)"},
 		}, "query"),
-		deepSeekTool("deepseek_fetch", "Fetch a web page with DeepSeek and return its extracted content.", "fetch", key, client, map[string]any{
+		deepSeekTool("deepseek_fetch", "Fetch a web page with DeepSeek and return its extracted content.", base+"fetch", key, client, map[string]any{
 			"url": map[string]any{"type": "string", "description": "Page URL to fetch"},
 		}, "url"),
 	}
 }
 
-func DeepSeekSearchProbe(ctx context.Context, key, proxy, query string, count int) (int, error) {
+func DeepSeekSearchProbe(ctx context.Context, baseURL, key, proxy, query string, count int) (int, error) {
 	if strings.TrimSpace(key) == "" {
 		return 0, fmt.Errorf("DeepSeek Search API Key is required")
+	}
+	base, err := DeepSeekToolsBaseURL(baseURL)
+	if err != nil {
+		return 0, err
 	}
 	client := &http.Client{Timeout: 30 * time.Second}
 	if strings.TrimSpace(proxy) != "" {
@@ -56,7 +84,7 @@ func DeepSeekSearchProbe(ctx context.Context, key, proxy, query string, count in
 		client.Transport = &http.Transport{Proxy: http.ProxyURL(parsed)}
 	}
 	body, _ := json.Marshal(map[string]any{"query": query, "count": count})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, deepSeekToolsURL+"search", strings.NewReader(string(body)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"search", strings.NewReader(string(body)))
 	if err != nil {
 		return 0, err
 	}
@@ -97,7 +125,7 @@ func deepSeekTool(name, description, endpoint, key string, client *http.Client, 
 				return actool.Errorf("invalid input"), nil
 			}
 			body, _ := json.Marshal(args)
-			req, err := http.NewRequestWithContext(ctx, http.MethodPost, deepSeekToolsURL+endpoint, strings.NewReader(string(body)))
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(body)))
 			if err != nil {
 				return actool.Errorf(err.Error()), nil
 			}

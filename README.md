@@ -312,6 +312,12 @@ CGO_ENABLED=0 go build -tags embedui -o artex ./cmd/artex
 ```
 
 **LLM**：`export ANTHROPIC_API_KEY=sk-...`（或 `OPENAI_API_KEY`），也可在 UI 的「LLM 配置」页填写。
+
+同一个模型配置可添加多个 API Key，每次 HTTP 请求按顺序轮换（包括重试），限速仍按整个模型配置共享。编辑时可保留已存 Key 后追加，或替换完整列表；全部留空则保持不变，服务端只回显脱敏提示。
+
+任务创建后可在详情页顶部调整 Worker 运行数量（1–50；0 或留空使用全局默认）。增加后自动补充 Worker；减少后不打断正在执行的工作，等运行数量降至设定值以下再领取新意图。暂停和排队任务保存设置后，在恢复执行时使用新值。
+
+「系统设置 → 网络搜索 → DeepSeek」支持自定义 Base URL，留空使用官方地址。可填写服务根地址、`/v1` 地址或完整 `/v1/tools` 地址；搜索、网页提取和连接测试均使用该地址。
 可选：`ARTEX_LLM_PROVIDER` / `ARTEX_LLM_MODEL` / `ARTEX_LLM_BASE_URL` / `ARTEX_LLM_PROXY`。
 
 **并发**：每个任务的 work agent 数在「系统设置」里配置（默认 3）。

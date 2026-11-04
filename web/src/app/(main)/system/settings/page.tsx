@@ -53,6 +53,7 @@ export default function SystemSettingsPage() {
   const [tavilyKeyInput, setTavilyKeyInput] = React.useState("");
   const [deepSeekKeySet, setDeepSeekKeySet] = React.useState(false);
   const [deepSeekKeyInput, setDeepSeekKeyInput] = React.useState("");
+  const [deepSeekBaseURL, setDeepSeekBaseURL] = React.useState("");
   const [savingDeepSeekKey, setSavingDeepSeekKey] = React.useState(false);
   const [savingTavilyKey, setSavingTavilyKey] = React.useState(false);
   const [proxyInput, setProxyInput] = React.useState("");
@@ -128,6 +129,7 @@ export default function SystemSettingsPage() {
     setBraveKeySet(!!s.brave_key_set);
     setTavilyKeySet(!!s.tavily_key_set);
     setDeepSeekKeySet(!!s.deepseek_search_key_set);
+    setDeepSeekBaseURL(s.deepseek_search_base_url ?? "");
     setProxyInput(s.web_search_proxy ?? "");
     const savedProxy = s.global_proxy ?? "";
     setGlobalProxyInput(savedProxy);
@@ -443,11 +445,17 @@ export default function SystemSettingsPage() {
 
   const saveDeepSeekKey = () => {
     setSavingDeepSeekKey(true);
-    api.setSettings({ deepseek_search_api_key: deepSeekKeyInput }).then((s) => {
-      apply(s);
-      setDeepSeekKeyInput("");
-      toast.success("已保存 DeepSeek Search API Key");
-    }).catch((e) => toast.error(`保存失败：${(e as Error).message}`))
+    api
+      .setSettings({
+        deepseek_search_base_url: deepSeekBaseURL.trim(),
+        ...(deepSeekKeyInput.trim() ? { deepseek_search_api_key: deepSeekKeyInput } : {}),
+      })
+      .then((s) => {
+        apply(s);
+        setDeepSeekKeyInput("");
+        toast.success("已保存 DeepSeek 搜索配置");
+      })
+      .catch((e) => toast.error(`保存失败：${(e as Error).message}`))
       .finally(() => setSavingDeepSeekKey(false));
   };
 
@@ -623,6 +631,7 @@ export default function SystemSettingsPage() {
         brave_search_api_key: braveKeyInput,
         tavily_search_api_key: tavilyKeyInput,
         deepseek_search_api_key: deepSeekKeyInput,
+        deepseek_search_base_url: deepSeekBaseURL.trim(),
       })
       .then((r) => {
         if (r.ok) toast.success(`搜索测试成功 · ${r.backend} 返回 ${r.count} 条结果`);
@@ -1494,7 +1503,7 @@ export default function SystemSettingsPage() {
                         <SelectItem value="ddgs">DuckDuckGo（ddgs · 免费无 Key）</SelectItem>
                         <SelectItem value="brave-free">Brave（免费版 · 需 Key）</SelectItem>
                         <SelectItem value="tavily">Tavily（需 Key）</SelectItem>
-                        <SelectItem value="deepseek">DeepSeek（官方）</SelectItem>
+                        <SelectItem value="deepseek">DeepSeek</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -1509,6 +1518,14 @@ export default function SystemSettingsPage() {
                     <p className="text-muted-foreground text-xs leading-relaxed">
                       搜索请求由 ARTEX 服务端发往 DeepSeek，可使用上方独立出口代理。API Key 只保存于服务端设置，不会回显。
                     </p>
+                    <Label htmlFor="deepseek-base-url">Base URL</Label>
+                    <Input
+                      id="deepseek-base-url"
+                      placeholder="https://api.deepseek.com"
+                      value={deepSeekBaseURL}
+                      disabled={!loaded || savingDeepSeekKey}
+                      onChange={(e) => setDeepSeekBaseURL(e.target.value)}
+                    />
                     <div className="flex items-center gap-2">
                       <Input
                         type="password"
@@ -1521,7 +1538,7 @@ export default function SystemSettingsPage() {
                       <Button
                         type="button"
                         onClick={saveDeepSeekKey}
-                        disabled={!loaded || savingDeepSeekKey || deepSeekKeyInput.trim() === ""}
+                        disabled={!loaded || savingDeepSeekKey}
                       >
                         保存
                       </Button>

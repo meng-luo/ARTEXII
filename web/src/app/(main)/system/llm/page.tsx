@@ -315,8 +315,11 @@ function ProfileSheet({
   const [model, setModel] = React.useState("");
   const [baseUrl, setBaseUrl] = React.useState("");
   const [proxy, setProxy] = React.useState("");
-  const [apiKey, setApiKey] = React.useState("");
+  const [apiKeys, setApiKeys] = React.useState([{ id: "initial", value: "" }]);
+  const keySequence = React.useRef(0);
+  const apiKey = apiKeys.map((key) => key.value).join("\n");
   const [keyHint, setKeyHint] = React.useState("");
+  const [appendKeys, setAppendKeys] = React.useState(true);
   const [rps, setRps] = React.useState("0");
   const [rpm, setRpm] = React.useState("0");
   const [cw, setCw] = React.useState("0"); // 上下文窗口(K tokens);0=默认200K
@@ -356,13 +359,18 @@ function ProfileSheet({
     setMaxTokensField(fromStore(profile?.max_tokens_field));
     setSessionHeaderKey(profile?.session_header_key ?? "");
     setRetry(profile?.retry ?? ZERO_OVERRIDE);
-    setApiKey("");
+    setApiKeys([{ id: String(++keySequence.current), value: "" }]);
     setKeyHint(profile?.api_key_hint ?? "");
+    setAppendKeys(true);
     setModels([]);
     setModelsOpen(false);
   }, [open, profile]);
 
   const profileId = profile ? Number(profile.id) : undefined;
+  let keyPlaceholder = "sk-…";
+  if (keyHint) {
+    keyPlaceholder = appendKeys ? "新增 API Key（留空保持不变）" : "替换 API Keys（留空保持不变）";
+  }
 
   async function loadModels() {
     if (loadingModels) return;
@@ -430,7 +438,11 @@ function ProfileSheet({
         model: model.trim(),
         base_url: baseUrl.trim(),
         proxy: proxy.trim(),
-        api_key: apiKey,
+        api_keys: apiKey
+          .split("\n")
+          .map((key) => key.trim())
+          .filter(Boolean),
+        append_api_keys: !!profile && appendKeys,
         rate_per_second: Number(rps) || 0,
         rate_per_minute: Number(rpm) || 0,
         context_window_k: Number(cw) || 0,
@@ -461,7 +473,7 @@ function ProfileSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="flex flex-col gap-0 p-0 data-[side=right]:min-w-[420px] data-[side=right]:sm:max-w-xl"
+        className="flex flex-col gap-0 p-0 data-[side=right]:w-full data-[side=right]:sm:min-w-[420px] data-[side=right]:sm:max-w-xl"
       >
         <SheetHeader className="px-4">
           <SheetTitle className="flex items-center gap-2">
@@ -603,14 +615,55 @@ function ProfileSheet({
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="p-api-key">API Key</Label>
-            <Input
-              id="p-api-key"
-              type="password"
-              placeholder={keyHint ? `已设置（${keyHint}），留空保持不变` : "sk-…"}
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-            />
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor={`p-api-key-${apiKeys[0]?.id}`}>API Keys（轮询）</Label>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                title="添加 API Key"
+                aria-label="添加 API Key"
+                onClick={() => setApiKeys([...apiKeys, { id: String(++keySequence.current), value: "" }])}
+              >
+                <PlusIcon />
+              </Button>
+            </div>
+            {keyHint && (
+              <>
+                <p className="break-all text-muted-foreground text-xs">已保存：{keyHint}</p>
+                <div className="flex items-center gap-2">
+                  <Switch id="p-append-keys" checked={appendKeys} onCheckedChange={setAppendKeys} />
+                  <Label htmlFor="p-append-keys">保留已存 Keys，追加新 Key</Label>
+                </div>
+              </>
+            )}
+            {apiKeys.map((key, index) => (
+              <div className="flex items-center gap-2" key={key.id}>
+                <Input
+                  id={`p-api-key-${key.id}`}
+                  type="password"
+                  autoComplete="off"
+                  aria-label={`API Key ${index + 1}`}
+                  placeholder={keyPlaceholder}
+                  value={key.value}
+                  onChange={(e) =>
+                    setApiKeys(apiKeys.map((item) => (item.id === key.id ? { ...item, value: e.target.value } : item)))
+                  }
+                />
+                {apiKeys.length > 1 && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    title="移除 API Key"
+                    aria-label={`移除 API Key ${index + 1}`}
+                    onClick={() => setApiKeys(apiKeys.filter((item) => item.id !== key.id))}
+                  >
+                    <Trash2Icon />
+                  </Button>
+                )}
+              </div>
+            ))}
           </div>
 
           <div className="grid gap-4 sm:grid-cols-3">

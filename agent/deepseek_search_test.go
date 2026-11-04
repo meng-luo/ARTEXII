@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -26,7 +27,7 @@ func TestDeepSeekSearchToolUsesConfiguredKeyAndQuery(t *testing.T) {
 		}
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"results":[{"title":"ARTEX","url":"https://example.test"}]}`)), Header: make(http.Header)}, nil
 	})}
-	tool := deepSeekTool("deepseek_search", "", "search", "test-key", client, map[string]any{
+	tool := deepSeekTool("deepseek_search", "", deepSeekToolsURL+"search", "test-key", client, map[string]any{
 		"query": map[string]any{"type": "string"}, "count": map[string]any{"type": "integer"},
 	}, "query")
 	result, err := tool.Call(context.Background(), []byte(`{"query":"ARTEX","count":3}`), nil)
@@ -35,6 +36,54 @@ func TestDeepSeekSearchToolUsesConfiguredKeyAndQuery(t *testing.T) {
 	}
 	if result.IsError || !strings.Contains(result.Flatten(), `"results"`) {
 		t.Fatalf("unexpected result: %+v", result)
+	}
+}
+
+func TestDeepSeekCustomBaseURLForToolsAndProbe(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer custom-key" {
+			t.Errorf("authorization = %q", r.Header.Get("Authorization"))
+		}
+		paths = append(paths, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"results":[{"title":"test"}]}`)
+	}))
+	defer srv.Close()
+	opts := WebSearchOpts{Enabled: true, Backend: "deepseek", DeepSeekAPIKey: "custom-key", DeepSeekBaseURL: srv.URL + "/gateway/v1"}
+	tools := deepSeekTools(opts)
+	if len(tools) != 2 {
+		t.Fatalf("tools = %d", len(tools))
+	}
+	for _, tool := range tools {
+		result, err := tool.Call(context.Background(), []byte(`{"query":"test","url":"https://example.test"}`), nil)
+		if err != nil || result.IsError {
+			t.Fatalf("tool call failed: %+v %v", result, err)
+		}
+	}
+	if count, err := DeepSeekSearchProbe(context.Background(), opts.DeepSeekBaseURL, opts.DeepSeekAPIKey, "", "test", 3); err != nil || count != 1 {
+		t.Fatalf("probe: count=%d err=%v", count, err)
+	}
+	if strings.Join(paths, ",") != "/gateway/v1/tools/search,/gateway/v1/tools/fetch,/gateway/v1/tools/search" {
+		t.Fatalf("request paths = %v", paths)
+	}
+}
+
+func TestDeepSeekBaseURLNormalization(t *testing.T) {
+	for _, base := range []string{"https://example.test", "https://example.test/v1/", "https://example.test/v1/tools/"} {
+		got, err := DeepSeekToolsBaseURL(base)
+		if err != nil || got != "https://example.test/v1/tools/" {
+			t.Fatalf("base=%q got=%q err=%v", base, got, err)
+		}
+	}
+	for _, base := range []string{"ftp://example.test", "invalid", "https://example.test/?query=1", "https://user:pass@example.test"} {
+		if _, err := DeepSeekToolsBaseURL(base); err == nil {
+			t.Fatalf("invalid base accepted: %q", base)
+		}
+	}
+	got, err := DeepSeekToolsBaseURL("")
+	if err != nil || got != deepSeekToolsURL {
+		t.Fatalf("default base=%q err=%v", got, err)
 	}
 }
 

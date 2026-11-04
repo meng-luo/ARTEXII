@@ -454,26 +454,31 @@ ORDER BY (pinned_at IS NOT NULL) DESC, pinned_at DESC NULLS LAST, id DESC`)
 	return out, nil
 }
 
-// TaskPatch updates task list metadata without changing execution state.
+// TaskPatch updates editable task metadata and worker concurrency.
 type TaskPatch struct {
-	Name   *string
-	Remark *string
-	Pinned *bool
+	Name        *string
+	Remark      *string
+	Pinned      *bool
+	WorkerCount *int
 }
 
-// UpdateTask applies a partial task name/remark/pin mutation and returns the updated row.
+// UpdateTask applies a partial task settings mutation and returns the updated row.
 // Re-pinning an already pinned task preserves its original position.
 func (d *DB) UpdateTask(id int64, patch TaskPatch) (*Task, error) {
+	if patch.WorkerCount != nil && (*patch.WorkerCount < 0 || *patch.WorkerCount > MaxTaskWorkerCount) {
+		return nil, fmt.Errorf("Worker 运行数量必须在 0 到 %d 之间", MaxTaskWorkerCount)
+	}
 	task, err := scanTask(d.QueryRow(`UPDATE tasks SET
 	name = CASE WHEN $2::boolean THEN $3 ELSE name END,
 	remark = CASE WHEN $5::boolean THEN $6 ELSE remark END,
+	worker_count = COALESCE($7::integer, worker_count),
 	pinned_at = CASE
 		WHEN $4::boolean IS NULL THEN pinned_at
 		WHEN $4::boolean THEN COALESCE(pinned_at, now())
 		ELSE NULL
 	END
 WHERE id=$1 AND deleted_at IS NULL
-RETURNING `+taskCols, id, patch.Name != nil, patch.Name, patch.Pinned, patch.Remark != nil, patch.Remark))
+RETURNING `+taskCols, id, patch.Name != nil, patch.Name, patch.Pinned, patch.Remark != nil, patch.Remark, patch.WorkerCount))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

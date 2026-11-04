@@ -1819,8 +1819,10 @@ func (s *Server) pgSaveProfile(w http.ResponseWriter, r *http.Request) {
 	// would get wrong — legacy/partial clients that never send it stay streaming.
 	var body struct {
 		db.LLMProfile
-		APIKey    string `json:"api_key"`
-		Streaming *bool  `json:"streaming"`
+		APIKey        string   `json:"api_key"`
+		APIKeys       []string `json:"api_keys"`
+		AppendAPIKeys bool     `json:"append_api_keys"`
+		Streaming     *bool    `json:"streaming"`
 	}
 	if err := decode(r, &body); err != nil {
 		writeErr(w, 400, err.Error())
@@ -1828,6 +1830,21 @@ func (s *Server) pgSaveProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	p := body.LLMProfile
 	p.APIKey = body.APIKey
+	if body.APIKeys != nil {
+		p.APIKey = strings.Join(body.APIKeys, "\n")
+	}
+	if body.AppendAPIKeys && p.ID > 0 && strings.TrimSpace(p.APIKey) != "" {
+		existing, err := pg.ProfileByID(p.ID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if existing == nil {
+			writeErr(w, http.StatusNotFound, "LLM profile not found")
+			return
+		}
+		p.APIKey = existing.APIKey + "\n" + p.APIKey
+	}
 	p.Streaming = body.Streaming == nil || *body.Streaming
 	// 输出上限:负数无意义,归零(= 不发送该字段)。字段名开关只有 Chat Completions
 	// 用得上——anthropic 与 openai-responses 各自定死了字段名,存下来只会误导后续读者,
@@ -2032,6 +2049,7 @@ func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": false, "error": "未提供 API Key"})
 		return
 	}
+	apiKey = llmhttp.NextAPIKey(apiKey)
 
 	if provider == "jev" {
 		baseURL, proxy := strings.TrimSpace(req.BaseURL), strings.TrimSpace(req.Proxy)

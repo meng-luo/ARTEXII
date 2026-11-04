@@ -163,7 +163,7 @@ func taskDTO(t *Task, status string) TaskDTO {
 		SourceTaskIDs:      sourceIDs,
 		CompanyIDs:         lifecycle.CompanyIDs,
 		CoverageEnabled:    t.CoverageEnabled,
-		WorkerCount:        t.WorkerCount,
+		WorkerCount:        lifecycle.WorkerCount,
 	}
 }
 

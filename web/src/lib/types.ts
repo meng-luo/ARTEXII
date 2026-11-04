@@ -1001,6 +1001,7 @@ export interface Settings {
   brave_search_api_key?: string;
   tavily_search_api_key?: string;
   deepseek_search_api_key?: string;
+  deepseek_search_base_url?: string;
   // 独立出口代理(http/https/socks5)，用于访问搜索端点；与记录流量的 MITM 代理无关。空=直连。
   web_search_proxy?: string;
   // 全局出口代理(http/https/socks5，可带 user:pass)，所有目标流量走它。开启流量捕获时作为

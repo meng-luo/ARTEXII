@@ -91,6 +91,7 @@ type Task struct {
 // updateLifecycle instead of reading or writing the corresponding Task fields
 // directly after the task has been published by Manager.
 type taskLifecycleState struct {
+	WorkerCount         int
 	Name                string
 	Remark              string
 	PinnedAt            int64
@@ -128,6 +129,7 @@ func (t *Task) lifecycleSnapshot() taskLifecycleState {
 
 func (t *Task) lifecycleSnapshotLocked() taskLifecycleState {
 	return taskLifecycleState{
+		WorkerCount:      t.WorkerCount,
 		Name:             t.Name,
 		Remark:           t.Remark,
 		PinnedAt:         t.PinnedAt,
@@ -158,6 +160,7 @@ func (t *Task) updateLifecycle(update func(*taskLifecycleState)) {
 	state := t.lifecycleSnapshotLocked()
 	update(&state)
 	t.Name = state.Name
+	t.WorkerCount = state.WorkerCount
 	t.Remark = state.Remark
 	t.PinnedAt = state.PinnedAt
 	t.Status = state.Status
@@ -295,17 +298,18 @@ func (m *Manager) SetTaskControlMutex(mu *sync.Mutex) { m.controlMu = mu }
 
 // Settings keys the UI toggles at runtime.
 const (
-	settingTrafficCapture      = "traffic_capture"
-	settingBrowserScreenshot   = "browser_screenshot_enabled"
-	settingScreenshotTimestamp = "browser_screenshot_timestamp_enabled"
-	settingOpsecEnabled        = "opsec_enabled"
-	settingAgentTrafficBinding = "agent_traffic_binding"
-	settingWebSearchOn         = "web_search_enabled"
-	settingWebSearchBackend    = "web_search_backend"
-	settingBraveKey            = "brave_search_api_key"
-	settingTavilyKey           = "tavily_search_api_key"
-	settingDeepSeekSearchKey   = "deepseek_search_api_key"
-	settingWebSearchProxy      = "web_search_proxy"
+	settingTrafficCapture        = "traffic_capture"
+	settingBrowserScreenshot     = "browser_screenshot_enabled"
+	settingScreenshotTimestamp   = "browser_screenshot_timestamp_enabled"
+	settingOpsecEnabled          = "opsec_enabled"
+	settingAgentTrafficBinding   = "agent_traffic_binding"
+	settingWebSearchOn           = "web_search_enabled"
+	settingWebSearchBackend      = "web_search_backend"
+	settingBraveKey              = "brave_search_api_key"
+	settingTavilyKey             = "tavily_search_api_key"
+	settingDeepSeekSearchKey     = "deepseek_search_api_key"
+	settingDeepSeekSearchBaseURL = "deepseek_search_base_url"
+	settingWebSearchProxy        = "web_search_proxy"
 	// settingGlobalProxy is the global egress proxy for all target traffic
 	// (http/https/socks5). Empty = direct. Distinct from web_search_proxy (which
 	// only routes the search backend) and the per-profile LLM proxy.
@@ -789,6 +793,7 @@ func (m *Manager) WebSearchOpts() agent.WebSearchOpts {
 	o := agent.WebSearchOpts{Enabled: on, Backend: backend, BraveKey: braveKey, TavilyKey: tavilyKey, Proxy: proxy}
 	if backend == deepSeekWebSearchBackend {
 		o.DeepSeekAPIKey = m.deepSeekSearchKey()
+		o.DeepSeekBaseURL = m.deepSeekSearchBaseURL()
 	}
 	return o
 }
@@ -796,6 +801,11 @@ func (m *Manager) WebSearchOpts() agent.WebSearchOpts {
 func (m *Manager) deepSeekSearchKey() string {
 	key, _, _ := m.pg.GetSetting(settingDeepSeekSearchKey)
 	return strings.TrimSpace(key)
+}
+
+func (m *Manager) deepSeekSearchBaseURL() string {
+	base, _, _ := m.pg.GetSetting(settingDeepSeekSearchBaseURL)
+	return strings.TrimSpace(base)
 }
 
 func (m *Manager) setDeepSeekSearchKey(key string) error {
@@ -1160,7 +1170,7 @@ func taskFromPG(pt *pgdb.Task, store *pgdb.ExplorationStore, ic *intercept.Inter
 	}
 }
 
-// UpdateTaskMetadata changes list-only task metadata without interrupting any
+// UpdateTaskMetadata changes editable task settings without interrupting any
 // planner, main-agent, or worker call.
 func (m *Manager) UpdateTaskMetadata(taskID string, patch pgdb.TaskPatch) (*Task, error) {
 	m.taskStateMu.Lock()
@@ -1183,6 +1193,7 @@ func (m *Manager) UpdateTaskMetadata(taskID string, patch pgdb.TaskPatch) (*Task
 		state.Name = updated.Name
 		state.Remark = updated.Remark
 		state.PinnedAt = unixOrZero(updated.PinnedAt)
+		state.WorkerCount = updated.WorkerCount
 	})
 	return task, nil
 }

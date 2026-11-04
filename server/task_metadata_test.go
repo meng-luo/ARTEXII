@@ -30,7 +30,7 @@ func TestTaskMetadataPatchReturnsRenameAndPin(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	body, _ := json.Marshal(map[string]any{"name": "  renamed task  ", "pinned": true})
+	body, _ := json.Marshal(map[string]any{"name": "  renamed task  ", "pinned": true, "worker_count": 7})
 	req := httptest.NewRequest(http.MethodPatch, "/api/tasks/"+task.ID, bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
@@ -39,15 +39,34 @@ func TestTaskMetadataPatchReturnsRenameAndPin(t *testing.T) {
 		t.Fatalf("patch status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	var updated struct {
-		Name     string `json:"name"`
-		Pinned   bool   `json:"pinned"`
-		PinnedAt string `json:"pinned_at"`
+		Name        string `json:"name"`
+		Pinned      bool   `json:"pinned"`
+		PinnedAt    string `json:"pinned_at"`
+		WorkerCount int    `json:"worker_count"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &updated); err != nil {
 		t.Fatal(err)
 	}
-	if updated.Name != "renamed task" || !updated.Pinned || updated.PinnedAt == "" {
+	if updated.Name != "renamed task" || !updated.Pinned || updated.PinnedAt == "" || updated.WorkerCount != 7 {
 		t.Fatalf("unexpected task patch response: %+v", updated)
+	}
+	saved, err := m.pg.GetTask(taskID)
+	if err != nil || saved.WorkerCount != 7 || task.lifecycleSnapshot().WorkerCount != 7 {
+		t.Fatalf("worker count not persisted/applied: saved=%+v err=%v", saved, err)
+	}
+	for _, count := range []int{-1, 51, 0} {
+		body, _ := json.Marshal(map[string]any{"worker_count": count})
+		req := httptest.NewRequest(http.MethodPatch, "/api/tasks/"+task.ID, bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, req)
+		want := http.StatusBadRequest
+		if count == 0 {
+			want = http.StatusOK
+		}
+		if rec.Code != want {
+			t.Fatalf("count=%d status=%d body=%s", count, rec.Code, rec.Body.String())
+		}
 	}
 
 	body, _ = json.Marshal(map[string]any{"name": strings.Repeat("任", maxTaskNameRunes+1)})

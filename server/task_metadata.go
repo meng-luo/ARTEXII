@@ -15,8 +15,7 @@ const (
 	maxTaskMetadataRequestSize = 16 << 10
 )
 
-// updateTaskMetadata changes list-only task metadata. It intentionally does not
-// touch lifecycle state, scheduling, or the task's immutable description/goal.
+// updateTaskMetadata applies editable task settings without interrupting work.
 func (s *Server) updateTaskMetadata(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("id")
 	if _, ok := s.m.Task(taskID); !ok {
@@ -25,9 +24,10 @@ func (s *Server) updateTaskMetadata(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxTaskMetadataRequestSize)
 	var request struct {
-		Name   *string `json:"name"`
-		Remark *string `json:"remark"`
-		Pinned *bool   `json:"pinned"`
+		Name        *string `json:"name"`
+		Remark      *string `json:"remark"`
+		Pinned      *bool   `json:"pinned"`
+		WorkerCount *int    `json:"worker_count"`
 	}
 	if err := decode(r, &request); err != nil {
 		var tooLarge *http.MaxBytesError
@@ -38,8 +38,8 @@ func (s *Server) updateTaskMetadata(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if request.Name == nil && request.Pinned == nil && request.Remark == nil {
-		writeErr(w, http.StatusBadRequest, "至少需要提供 name、pinned 或 remark")
+	if request.Name == nil && request.Pinned == nil && request.Remark == nil && request.WorkerCount == nil {
+		writeErr(w, http.StatusBadRequest, "至少需要提供 name、pinned、remark 或 worker_count")
 		return
 	}
 	if request.Name != nil {
@@ -63,7 +63,11 @@ func (s *Server) updateTaskMetadata(w http.ResponseWriter, r *http.Request) {
 		}
 		request.Remark = &remark
 	}
-	task, err := s.m.UpdateTaskMetadata(taskID, db.TaskPatch{Name: request.Name, Pinned: request.Pinned, Remark: request.Remark})
+	if request.WorkerCount != nil && (*request.WorkerCount < 0 || *request.WorkerCount > db.MaxTaskWorkerCount) {
+		writeErr(w, http.StatusBadRequest, fmt.Sprintf("Worker 运行数量必须在 0 到 %d 之间", db.MaxTaskWorkerCount))
+		return
+	}
+	task, err := s.m.UpdateTaskMetadata(taskID, db.TaskPatch{Name: request.Name, Pinned: request.Pinned, Remark: request.Remark, WorkerCount: request.WorkerCount})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return

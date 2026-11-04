@@ -101,7 +101,7 @@ func (c Config) ListModels(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(c.APIKey))
+	req.Header.Set("Authorization", "Bearer "+llmhttp.NextAPIKey(c.APIKey))
 	resp, err := hc.Do(req)
 	if err != nil {
 		return nil, err
@@ -315,7 +315,7 @@ func (c Config) Do(ctx context.Context, req Request) (Response, error) {
 	if err != nil {
 		return Response{}, err
 	}
-	hreq.Header.Set("Authorization", "Bearer "+strings.TrimSpace(c.APIKey))
+	hreq.Header.Set("Authorization", "Bearer "+llmhttp.NextAPIKey(c.APIKey))
 	hreq.Header.Set("Content-Type", "application/json")
 	resp, err := hc.Do(hreq)
 	if err != nil {

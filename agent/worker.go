@@ -33,12 +33,13 @@ import (
 // independent of the traffic-recording MITM proxy — set it when the search endpoint
 // is only reachable via a VPN/SOCKS proxy. Empty = direct.
 type WebSearchOpts struct {
-	Enabled        bool
-	Backend        string
-	BraveKey       string
-	TavilyKey      string
-	Proxy          string
-	DeepSeekAPIKey string
+	Enabled         bool
+	Backend         string
+	BraveKey        string
+	TavilyKey       string
+	Proxy           string
+	DeepSeekAPIKey  string
+	DeepSeekBaseURL string
 }
 
 type Worker struct {

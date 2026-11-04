@@ -5,7 +5,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 
-import { ArchiveIcon, ArrowLeftIcon, BrainIcon, CheckIcon, CircleAlertIcon, PauseIcon, PlayIcon } from "lucide-react";
+import { ArchiveIcon, ArrowLeftIcon, BrainIcon, CheckIcon, CircleAlertIcon, PauseIcon, PlayIcon, UsersIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { IntelligencePanel } from "@/components/intelligence-panel";
@@ -25,6 +25,8 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Popover,
   PopoverContent,
@@ -40,6 +42,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
 import type { LLMProfile, Task } from "@/lib/types";
+import { MAX_TASK_WORKER_COUNT, parseWorkerCountInput } from "@/lib/types";
 
 import { AssetsTab } from "./_tabs/assets-tab";
 import { BroadcastTab } from "./_tabs/broadcast-tab";
@@ -72,6 +75,67 @@ function taskProfileIDs(task: Task): string[] {
     return task.llm_profile_ids.map(String);
   }
   return task.llm_profile_id ? [String(task.llm_profile_id)] : [];
+}
+
+function TaskWorkerControl({ task, onUpdated }: { task: Task; onUpdated: () => void }) {
+  const [open, setOpen] = React.useState(false);
+  const [count, setCount] = React.useState("");
+  const [saving, setSaving] = React.useState(false);
+  const save = async () => {
+    const value = parseWorkerCountInput(count);
+    if (value == null) {
+      toast.error(`Worker 数量必须是 0 到 ${MAX_TASK_WORKER_COUNT} 之间的整数`);
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.updateTask(task.id, { worker_count: value });
+      toast.success("Worker 数量已更新");
+      setOpen(false);
+      onUpdated();
+    } catch (error) {
+      toast.error(`更新失败：${(error as Error).message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (next) setCount(task.worker_count ? String(task.worker_count) : "");
+      }}
+    >
+      <PopoverTrigger asChild>
+        <Button size="sm" variant="outline" aria-label="调整 Worker 运行数量" title="调整 Worker 运行数量">
+          <UsersIcon />
+          <span>{task.worker_count ? task.worker_count : "默认"}</span>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-[min(20rem,calc(100vw-2rem))] gap-4 p-4">
+        <PopoverHeader>
+          <PopoverTitle>Worker 运行数量</PopoverTitle>
+        </PopoverHeader>
+        <Label htmlFor="task-worker-count">数量（0 为全局默认）</Label>
+        <Input
+          id="task-worker-count"
+          type="number"
+          min={0}
+          max={MAX_TASK_WORKER_COUNT}
+          step={1}
+          placeholder="全局默认"
+          value={count}
+          disabled={saving}
+          onChange={(e) => setCount(e.target.value)}
+        />
+        <Button type="button" size="sm" disabled={saving} onClick={save}>
+          {saving && <Spinner />}
+          保存
+        </Button>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 function TaskLLMControl({ task, profiles, onUpdated }: { task: Task; profiles: LLMProfile[]; onUpdated: () => void }) {
@@ -387,6 +451,7 @@ function TaskDetailInner() {
           </code>
           <Separator orientation="vertical" className="mx-1 hidden h-4 sm:block" />
           <TaskLLMControl task={task} profiles={profiles} onUpdated={load} />
+          <TaskWorkerControl task={task} onUpdated={load} />
           <StatusBadge domain={terminal ? "task" : "engine"} value={terminal ? task.status : engineMode} dot />
           {canArchive ? (
             <AlertDialog>

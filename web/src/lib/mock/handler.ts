@@ -1463,7 +1463,9 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     const namePresent = has("name") && b.name !== null;
     const remarkPresent = has("remark") && b.remark !== null;
     const pinnedPresent = has("pinned") && b.pinned !== null;
-    if (!namePresent && !remarkPresent && !pinnedPresent) throw new Error("至少需要提供 name、pinned 或 remark");
+    const workerPresent = has("worker_count") && b.worker_count !== null;
+    const workerCount = workerPresent ? mockWorkerCount(b.worker_count) : task.worker_count;
+    if (!namePresent && !remarkPresent && !pinnedPresent && !workerPresent) throw new Error("至少需要提供 name、pinned、remark 或 worker_count");
     let nextName = task.name;
     let nextRemark = task.remark;
     let nextPinned = task.pinned;
@@ -1484,6 +1486,7 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     task.remark = nextRemark;
     task.pinned = nextPinned;
     task.pinned_at = nextPinnedAt;
+    task.worker_count = workerCount;
     sortMockTasks();
     return structuredClone(task);
   }

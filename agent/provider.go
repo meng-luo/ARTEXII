@@ -287,11 +287,15 @@ func (c Config) newProvider(client *http.Client, limiter *RequestLimiter) (llm.P
 	if err := limiter.configure(c.RatePerSecond, c.RatePerMinute); err != nil {
 		return nil, err
 	}
-	client.Transport = rateLimitedTransport{base: client.Transport, limiter: limiter}
+	client.Transport = rateLimitedTransport{base: llmhttp.RotateAPIKeys(client.Transport, c.APIKey), limiter: limiter}
+	key := ""
+	if keys := llmhttp.APIKeys(c.APIKey); len(keys) > 0 {
+		key = keys[0]
+	}
 	lc := llm.Config{
 		Format:     c.Format,
 		BaseURL:    c.BaseURL,
-		APIKey:     c.APIKey,
+		APIKey:     key,
 		Model:      c.Model,
 		HTTPClient: client,
 	}

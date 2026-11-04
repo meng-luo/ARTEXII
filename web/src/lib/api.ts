@@ -380,7 +380,7 @@ export const api = {
   runScheduleNow: (id: number) =>
     post<{ ok: boolean; started: number; errors?: string[] }>(`/schedules/${id}/run-now`, {}),
   taskCategories: () => get<{ categories: TaskCategory[] }>("/task-categories").then((r) => arr(r.categories)),
-  updateTask: (id: string, input: { name?: string; pinned?: boolean; remark?: string }) =>
+  updateTask: (id: string, input: { name?: string; pinned?: boolean; remark?: string; worker_count?: number }) =>
     patch<Task>(`/tasks/${id}`, input),
   renameTask: (id: string, name: string) => patch<Task>(`/tasks/${id}`, { name }),
   pinTask: (id: string, pinned: boolean) => patch<Task>(`/tasks/${id}`, { pinned }),
@@ -998,6 +998,7 @@ export const api = {
     brave_search_api_key?: string;
     tavily_search_api_key?: string;
     deepseek_search_api_key?: string;
+    deepseek_search_base_url?: string;
   }) => post<{ ok: boolean; error?: string; count?: number; backend?: string }>(`/settings/web-search/test`, patch),
 
   // global_proxy 传空 = 测直连；probe_url 可覆盖默认探测地址（隔离网用）。
@@ -1176,6 +1177,8 @@ export const api = {
     base_url?: string;
     proxy?: string;
     api_key?: string; // blank on update keeps the existing key
+    api_keys?: string[];
+    append_api_keys?: boolean;
     rate_per_second?: number;
     rate_per_minute?: number;
     context_window_k?: number;
