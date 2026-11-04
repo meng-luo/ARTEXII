@@ -9,7 +9,7 @@ AI 自主渗透测试系统（Go 后端 + Next.js 前端）
 
 </div>
 
-本仓库为独立维护的 [RuoJi6/ARTEX](https://github.com/RuoJi6/ARTEX)，保留 https://github.com/Autumn-27/ARTEX 的原始提交历史与 AGPL-3.0 许可证。程序发布包从本仓库 Releases 下载，Docker 镜像 [ruoji6/artex](https://hub.docker.com/r/ruoji6/artex) 由本仓库 GitHub Actions 构建并发布。
+本仓库基于 [RuoJi6/ARTEX](https://github.com/RuoJi6/ARTEX)，保留 https://github.com/Autumn-27/ARTEX 的原始提交历史与 AGPL-3.0 许可证。程序发布包从本仓库 Releases 下载，Docker 镜像 `ghcr.io/meng-luo/artex` 由本仓库 GitHub Actions 构建并发布。
 
 ---
 ## 致谢
@@ -204,7 +204,9 @@ ARTEX_TARGETS=linux/amd64,windows/amd64 ./build.sh --release
 
 ### 维护者：通过 GitHub Actions 发布在线更新
 
-发布工作流为 `.github/workflows/release.yml`。推送正式标签会触发构建，也可在 Actions → release → Run workflow 中输入已存在的标签重新执行失败的发布。标签必须是 `v主版本.次版本.修订号`，例如下例的 `v0.3.17`；后续版本必须高于用户正在运行的版本。
+发布工作流为 `.github/workflows/release.yml`。每次提交推送到 `main` 后自动构建并推送 Linux AMD64 / ARM64 镜像，发布 `latest` 和 `sha-<完整提交号>` 标签；普通提交只发布镜像，不创建 GitHub Release，也不更新 Demo。仅在本地执行 `git commit` 不会触发，需要 `git push origin main`。
+
+推送正式标签会触发完整发布，也可在 Actions → release → Run workflow 中输入已存在的标签重新执行失败的发布；tag 留空时只构建所选分支或标签的镜像，若选择正式标签则执行完整发布。正式标签必须是 `v主版本.次版本.修订号`，例如下例的 `v0.3.17`；后续版本必须高于用户正在运行的版本。
 
 ```bash
 git push origin main
@@ -214,7 +216,14 @@ git push origin v0.3.17
 
 工作流固定标签对应的提交，用 Node.js 22 导出前端，按照 `go.mod` 指定的 Go 版本编译内嵌前端的五个平台程序，并生成 ZIP 与 `SHA256SUMS`。AMD64 和 ARM64 镜像分别在 GitHub 原生 runner 上构建，连接临时 PostgreSQL 验证程序启动、版本和内嵌前端；两种架构都通过后发布多架构镜像的版本标签与 `latest`。镜像发布成功后上传完整 ZIP 和校验文件，最后公开 Release。已公开的同版本不允许覆盖，应发布新标签。
 
-维护者需在本仓库 Settings → Secrets and variables → Actions 中配置变量 `ARTEX_DOCKER_IMAGE`（Docker Hub 用户名/镜像名）和 Secrets `DOCKERHUB_USERNAME`、`DOCKERHUB_TOKEN`（有镜像推送权限）。程序包通过 GitHub 自带 `GITHUB_TOKEN` 上传，镜像通过上述凭据推送到 Docker Hub。凭据只供工作流登录使用，不写入源码或镜像。镜像地址同时记录在 `.env.example` 和 Compose 默认值中。
+镜像自动推送到 `ghcr.io/<仓库所有者>/artex`（所有者全部小写），本仓库为 `ghcr.io/meng-luo/artex`。程序包上传和镜像推送均使用 GitHub 自带 `GITHUB_TOKEN`；镜像构建与发布 job 已声明 `packages: write`，无需配置 Docker Hub 凭据或额外 PAT。首次发布的 GHCR 包默认为私有；如需匿名拉取，在 GitHub 包设置中将可见性改为 Public。
+
+推送 `v主版本.次版本.修订号` 标签或手动运行 `release` 工作流后，会发布 `<版本>-amd64`、`<版本>-arm64`，以及包含两个架构的 `<版本>` 和 `latest`。使用 GHCR 镜像部署时，在 `.env` 中设置以下值，再执行 `docker compose pull artex && docker compose up -d artex`：
+
+```dotenv
+ARTEX_IMAGE=ghcr.io/meng-luo/artex
+ARTEX_TAG=latest
+```
 
 ### 已有 Docker 部署迁移到本仓库镜像
 
