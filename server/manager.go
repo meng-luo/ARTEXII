@@ -68,7 +68,8 @@ type Task struct {
 	TimeoutSeconds       int                    `json:"timeout_seconds"`
 	PlanHeartbeatSeconds int                    `json:"plan_heartbeat_seconds"` // planner 心跳触发间隔(秒)
 	CoverageEnabled      bool                   `json:"coverage_enabled"`       // 资产覆盖度功能开关(创建时定,默认开)
-	WorkerCount          int                    `json:"worker_count"`           // 本任务 Worker 数;0=用全局默认
+	ShareGlobalAssets    bool                   `json:"share_global_assets"`
+	WorkerCount          int                    `json:"worker_count"` // 本任务 Worker 数;0=用全局默认
 	FirstRunAt           int64                  `json:"first_run_at,omitempty"`
 	DeadlineAt           int64                  `json:"deadline_at,omitempty"`
 	ActiveRunSeconds     int64                  `json:"active_run_seconds"`
@@ -92,6 +93,7 @@ type Task struct {
 // directly after the task has been published by Manager.
 type taskLifecycleState struct {
 	WorkerCount         int
+	ShareGlobalAssets   bool
 	Name                string
 	Remark              string
 	PinnedAt            int64
@@ -129,14 +131,15 @@ func (t *Task) lifecycleSnapshot() taskLifecycleState {
 
 func (t *Task) lifecycleSnapshotLocked() taskLifecycleState {
 	return taskLifecycleState{
-		WorkerCount:      t.WorkerCount,
-		Name:             t.Name,
-		Remark:           t.Remark,
-		PinnedAt:         t.PinnedAt,
-		Status:           t.Status,
-		Paused:           t.Paused,
-		PauseReason:      t.PauseReason,
-		ReconnectAttempt: t.ReconnectAttempt, ReconnectMax: t.ReconnectMax, ReconnectNextAt: t.ReconnectNextAt, ReconnectExhausted: t.ReconnectExhausted, ReconnectLastError: t.ReconnectLastError, ReconnectGeneration: t.ReconnectGeneration,
+		WorkerCount:       t.WorkerCount,
+		ShareGlobalAssets: t.ShareGlobalAssets,
+		Name:              t.Name,
+		Remark:            t.Remark,
+		PinnedAt:          t.PinnedAt,
+		Status:            t.Status,
+		Paused:            t.Paused,
+		PauseReason:       t.PauseReason,
+		ReconnectAttempt:  t.ReconnectAttempt, ReconnectMax: t.ReconnectMax, ReconnectNextAt: t.ReconnectNextAt, ReconnectExhausted: t.ReconnectExhausted, ReconnectLastError: t.ReconnectLastError, ReconnectGeneration: t.ReconnectGeneration,
 		Queued:              t.Queued,
 		QueuedAt:            t.QueuedAt,
 		QueueMode:           t.QueueMode,
@@ -159,6 +162,7 @@ func (t *Task) updateLifecycle(update func(*taskLifecycleState)) {
 	t.lifecycleMu.Lock()
 	state := t.lifecycleSnapshotLocked()
 	update(&state)
+	t.ShareGlobalAssets = state.ShareGlobalAssets
 	t.Name = state.Name
 	t.WorkerCount = state.WorkerCount
 	t.Remark = state.Remark
@@ -1163,14 +1167,14 @@ func taskFromPG(pt *pgdb.Task, store *pgdb.ExplorationStore, ic *intercept.Inter
 		SourceTaskIDs:  append([]int64(nil), pt.SourceTaskIDs...),
 		CompanyIDs:     append([]int64(nil), pt.CompanyIDs...),
 		TimeoutSeconds: pt.TimeoutSeconds, PlanHeartbeatSeconds: pt.PlanHeartbeatSeconds,
-		CoverageEnabled: pt.CoverageEnabled, WorkerCount: pt.WorkerCount,
+		CoverageEnabled: pt.CoverageEnabled, ShareGlobalAssets: pt.ShareGlobalAssets, WorkerCount: pt.WorkerCount,
 		FirstRunAt: unixOrZero(pt.FirstRunAt), DeadlineAt: unixOrZero(pt.DeadlineAt),
 		ActiveRunSeconds: pt.ActiveRunSeconds, RunSegmentStartedAt: unixOrZero(pt.RunSegmentStartedAt),
 		Store: store, Guard: guard.NewWithInterceptor(ic), notify: make(chan struct{}, 1),
 	}
 }
 
-// UpdateTaskMetadata changes editable task settings without interrupting any
+// UpdateTaskMetadata changes task settings and asset visibility without interrupting any
 // planner, main-agent, or worker call.
 func (m *Manager) UpdateTaskMetadata(taskID string, patch pgdb.TaskPatch) (*Task, error) {
 	m.taskStateMu.Lock()
@@ -1190,6 +1194,7 @@ func (m *Manager) UpdateTaskMetadata(taskID string, patch pgdb.TaskPatch) (*Task
 		return nil, nil
 	}
 	task.updateLifecycle(func(state *taskLifecycleState) {
+		state.ShareGlobalAssets = updated.ShareGlobalAssets
 		state.Name = updated.Name
 		state.Remark = updated.Remark
 		state.PinnedAt = unixOrZero(updated.PinnedAt)

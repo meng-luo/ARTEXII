@@ -253,6 +253,7 @@ function mockTaskArchiveBlocker(taskID: string): string | undefined {
 
 function publicMockTask(task: Task): Task {
   const item = structuredClone(task);
+  item.share_global_assets = task.share_global_assets ?? false;
   const blocker = mockTaskArchiveBlocker(task.id);
   if (blocker) item.archive_blocked_by_task_id = blocker;
   else delete item.archive_blocked_by_task_id;
@@ -1272,6 +1273,7 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
       llm_failover_state: profileIDs.length ? "ready" : "default",
       source_task_ids: sourceTaskIDs,
       company_ids: companyIDs,
+      share_global_assets: b.share_global_assets === true,
     };
     const numericTaskID = nextMockTaskAssetID++;
     mockTaskAssetIDs.set(id, numericTaskID);
@@ -1460,12 +1462,14 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     if (has("name") && b.name !== null && typeof b.name !== "string") throw new Error("任务名称必须是字符串");
     if (has("remark") && b.remark !== null && typeof b.remark !== "string") throw new Error("备注必须是字符串");
     if (has("pinned") && b.pinned !== null && typeof b.pinned !== "boolean") throw new Error("pinned 必须是布尔值");
+    if (has("share_global_assets") && b.share_global_assets !== null && typeof b.share_global_assets !== "boolean") throw new Error("share_global_assets 必须是布尔值");
+    const sharingPresent = has("share_global_assets") && b.share_global_assets !== null;
     const namePresent = has("name") && b.name !== null;
     const remarkPresent = has("remark") && b.remark !== null;
     const pinnedPresent = has("pinned") && b.pinned !== null;
     const workerPresent = has("worker_count") && b.worker_count !== null;
     const workerCount = workerPresent ? mockWorkerCount(b.worker_count) : task.worker_count;
-    if (!namePresent && !remarkPresent && !pinnedPresent && !workerPresent) throw new Error("至少需要提供 name、pinned、remark 或 worker_count");
+    if (!namePresent && !remarkPresent && !pinnedPresent && !workerPresent && !sharingPresent) throw new Error("至少需要提供 name、pinned、remark、worker_count 或 share_global_assets");
     let nextName = task.name;
     let nextRemark = task.remark;
     let nextPinned = task.pinned;
@@ -1482,6 +1486,7 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
       nextPinned = pinned;
       nextPinnedAt = pinned ? (task.pinned_at ?? new Date().toISOString()) : null;
     }
+    if (sharingPresent) task.share_global_assets = b.share_global_assets as boolean;
     task.name = nextName;
     task.remark = nextRemark;
     task.pinned = nextPinned;

@@ -15,7 +15,7 @@ const (
 	maxTaskMetadataRequestSize = 16 << 10
 )
 
-// updateTaskMetadata applies editable task settings without interrupting work.
+// updateTaskMetadata updates task settings and the live asset-sharing policy.
 func (s *Server) updateTaskMetadata(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("id")
 	if _, ok := s.m.Task(taskID); !ok {
@@ -24,10 +24,11 @@ func (s *Server) updateTaskMetadata(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxTaskMetadataRequestSize)
 	var request struct {
-		Name        *string `json:"name"`
-		Remark      *string `json:"remark"`
-		Pinned      *bool   `json:"pinned"`
-		WorkerCount *int    `json:"worker_count"`
+		Name              *string `json:"name"`
+		Remark            *string `json:"remark"`
+		Pinned            *bool   `json:"pinned"`
+		WorkerCount       *int    `json:"worker_count"`
+		ShareGlobalAssets *bool   `json:"share_global_assets"`
 	}
 	if err := decode(r, &request); err != nil {
 		var tooLarge *http.MaxBytesError
@@ -38,8 +39,8 @@ func (s *Server) updateTaskMetadata(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if request.Name == nil && request.Pinned == nil && request.Remark == nil && request.WorkerCount == nil {
-		writeErr(w, http.StatusBadRequest, "至少需要提供 name、pinned、remark 或 worker_count")
+	if request.Name == nil && request.Pinned == nil && request.Remark == nil && request.WorkerCount == nil && request.ShareGlobalAssets == nil {
+		writeErr(w, http.StatusBadRequest, "至少需要提供 name、pinned、remark、worker_count 或 share_global_assets")
 		return
 	}
 	if request.Name != nil {
@@ -67,7 +68,7 @@ func (s *Server) updateTaskMetadata(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf("Worker 运行数量必须在 0 到 %d 之间", db.MaxTaskWorkerCount))
 		return
 	}
-	task, err := s.m.UpdateTaskMetadata(taskID, db.TaskPatch{Name: request.Name, Pinned: request.Pinned, Remark: request.Remark, WorkerCount: request.WorkerCount})
+	task, err := s.m.UpdateTaskMetadata(taskID, db.TaskPatch{Name: request.Name, Pinned: request.Pinned, Remark: request.Remark, WorkerCount: request.WorkerCount, ShareGlobalAssets: request.ShareGlobalAssets})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
