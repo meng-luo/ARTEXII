@@ -270,6 +270,33 @@ func (s *ExplorationStore) SetNodeState(id int64, state string) error {
 	return err
 }
 
+// SetGoalState changes only a local goal. Repeated requests are no-ops.
+func (s *ExplorationStore) SetGoalState(id int64, state string) (*Node, bool, error) {
+	if state != "open" && state != "met" {
+		return nil, false, fmt.Errorf("目标状态只能是 open 或 met")
+	}
+	node, err := scanNode(s.db.QueryRow(`UPDATE exploration_nodes
+SET state=$1, blocked_reason=NULL, content_version=content_version+1
+WHERE id=$2 AND exploration_id=$3 AND kind='goal' AND state<>$1
+RETURNING `+nodeCols, state, id, s.expID))
+	if err != sql.ErrNoRows {
+		return node, err == nil, err
+	}
+	node, err = s.GetNode(id)
+	if node != nil && node.Kind != KindGoal {
+		node = nil
+	}
+	return node, false, err
+}
+
+func (s *ExplorationStore) AllGoalsMet() (bool, error) {
+	var met bool
+	err := s.db.QueryRow(`SELECT
+EXISTS(SELECT 1 FROM exploration_nodes WHERE exploration_id=$1 AND kind='goal')
+AND NOT EXISTS(SELECT 1 FROM exploration_nodes WHERE exploration_id=$1 AND kind='goal' AND state<>'met')`, s.expID).Scan(&met)
+	return met, err
+}
+
 // UpdateGoalPayload rewrites a goal node's payload text (and optional vulnclass);
 // scoped to kind='goal' so it can never mutate an intent/fact by id. Returns an
 // error if no such goal exists in this exploration.

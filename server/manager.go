@@ -79,6 +79,8 @@ type Task struct {
 	notify               chan struct{}
 	lifecycleMu          sync.RWMutex
 	llmMu                sync.RWMutex
+	goalMu               sync.Mutex    // manual goal changes and task completion
+	goalRevision         atomic.Uint64 // invalidates an in-flight planner's completion verdict
 
 	// pendingTriggers accumulates the concrete changes (worker done / finding) that
 	// fired planning rounds since the last one consumed them. The debounce coalesces
@@ -2418,6 +2420,15 @@ func (t *Task) NotifyGoalEdited(oldText, newText string) {
 	}
 	t.trigMu.Lock()
 	t.pendingTriggers = append(t.pendingTriggers, agent.TriggerEvent{Kind: "goal_edited", OldGoal: oldText, NewGoal: newText})
+	t.trigMu.Unlock()
+	t.Notify()
+}
+
+func (t *Task) NotifyGoalState(text, state string) {
+	t.trigMu.Lock()
+	t.pendingTriggers = append(t.pendingTriggers, agent.TriggerEvent{
+		Kind: "goal_state", Detail: text, GoalState: state,
+	})
 	t.trigMu.Unlock()
 	t.Notify()
 }

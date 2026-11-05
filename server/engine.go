@@ -920,7 +920,9 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 		// met→cancelExec 杀掉用户经主 agent 直投的意图。是否结束改由 frontier 决定：
 		// 还有 open/running 意图 → 保持 running、静默等待；意图已全部跑干 → 落 done。
 		// 整段纯 Go、不触发任何 LLM 调用，也不打规划轮 marker。
+		t.goalMu.Lock()
 		if open, err := t.Store.HasOpenGoal(); err == nil && !open {
+			defer t.goalMu.Unlock()
 			t.drainTriggers() // 丢弃累积的 done/finding 触发，避免 goalless 长会话里无界增长
 			if active, err := t.Store.HasActiveIntent(); err == nil && !active {
 				// frontier 抽干且无在跑意图 → 收尾。用 Guarded 版做 CAS，避免踩到并发的
@@ -934,6 +936,7 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 			}
 			return // goalless 分支永不进入 planner.Plan
 		}
+		t.goalMu.Unlock()
 		if !e.beginTaskOperation(t.ID) {
 			return
 		}
@@ -962,6 +965,11 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 		// coalesces a burst; empty for time/heartbeat wakes).
 		triggers := t.drainTriggers()
 		taskIDInt, _ := strconv.ParseInt(t.ID, 10, 64)
+		goalRevision := t.goalRevision.Load()
+		ectx = agent.WithGoalStateGuard(ectx, func() (func(), bool) {
+			t.goalMu.Lock()
+			return t.goalMu.Unlock, t.goalRevision.Load() == goalRevision
+		})
 		e.BeginLLMCall(t.ID)
 		met, reason, err := planner.Plan(ectx, taskIDInt, e.m.assets, t.Store, t.Goal, triggers, emit)
 		e.EndLLMCall(t.ID)
@@ -973,14 +981,9 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 			}
 		case met:
 			log.Printf("[planner] task %s 判定目标达成: %s", t.ID, reason)
-			// 所有目标达成 → 持久化任务状态为 done（前端 DTO 会优先展示该终态）。
-			if err := e.m.SetTaskStatus(t.ID, "done"); err != nil {
+			if _, err := e.completePlannerGoals(ectx, t, goalRevision); err != nil {
 				log.Printf("[planner] task %s 标记完成落库失败: %v", t.ID, err)
 			}
-			// 任务已判完成 → 立刻取消在跑的 worker：它们手头的意图跑出来也没意义了。
-			// 下一轮 worker 循环撞终态门就不再领新意图;被取消的这批走下方"任务已完成"分支
-			// 归为 stopped(而非 blocked)。
-			e.cancelExec(t.ID, agent.AbortGoalMet)
 		default:
 			log.Printf("[planner] task %s 规划完成", t.ID)
 		}
@@ -1000,6 +1003,25 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 		// 每次唤醒(边沿或心跳)后重臂心跳:任意规划触发都重算这段静置计时。
 		resetPlannerTimer(heartbeat, interval)
 	}
+}
+
+// A manual change during Plan invalidates its completion verdict. Serialize the
+// final status write with reopening so an old round cannot finish a revived task.
+func (e *Engine) completePlannerGoals(ctx context.Context, t *Task, revision uint64) (bool, error) {
+	t.goalMu.Lock()
+	defer t.goalMu.Unlock()
+	if ctx.Err() != nil {
+		return false, nil
+	}
+	if revision != t.goalRevision.Load() {
+		t.Notify()
+		return false, nil
+	}
+	won, err := e.m.SetTaskStatusGuarded(t.ID, "done")
+	if err == nil && won {
+		e.cancelExec(t.ID, agent.AbortGoalMet)
+	}
+	return won, err
 }
 
 func (e *Engine) workerLoop(ctx context.Context, t *Task, slot WorkerSlot, pool *taskWorkerPool) {

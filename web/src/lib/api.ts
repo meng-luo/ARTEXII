@@ -501,6 +501,8 @@ export const api = {
   // 人工修改目标文本（及 vulnclass）：通知 planner「由 old 变为 new」、复活任务。
   updateGoal: (id: string, goalId: string, text: string, vulnclass?: string) =>
     patch<TaskGoal>(`/tasks/${id}/goals/${goalId}`, { text, vulnclass: vulnclass ?? "" }),
+  setGoalState: (id: string, goalId: string, state: "open" | "met") =>
+    patch<TaskGoal>(`/tasks/${id}/goals/${goalId}/state`, { state }),
   // 人工删除目标（硬删除）：通知 planner，删除不复活任务。
   deleteGoal: (id: string, goalId: string) => del<{ ok: boolean }>(`/tasks/${id}/goals/${goalId}`),
 

@@ -13,6 +13,7 @@ import {
   PencilIcon,
   PlusIcon,
   RefreshCwIcon,
+  RotateCcwIcon,
   ShieldAlertIcon,
   ShieldCheckIcon,
   TargetIcon,
@@ -27,6 +28,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Progress } from "@/components/ui/progress";
 import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
 import type {
   AssetInterceptKind,
@@ -223,6 +225,19 @@ export function OverviewTab({ taskId }: { taskId: string }) {
       await api.deleteGoal(taskId, g.id);
     } catch {
       await loadGoals(); // 删除失败：重新拉取还原
+    }
+  };
+
+  const toggleGoalState = async (g: TaskGoal) => {
+    setGoalBusy(true);
+    setGoalErr("");
+    try {
+      const updated = await api.setGoalState(taskId, g.id, g.state === "met" ? "open" : "met");
+      setGoals((current) => current.map((goal) => (goal.id === g.id ? updated : goal)));
+    } catch (e) {
+      setGoalErr(e instanceof Error ? e.message : "更新状态失败");
+    } finally {
+      setGoalBusy(false);
     }
   };
 
@@ -537,32 +552,58 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                     </Button>
                   </div>
                 ) : (
-                  <div key={g.id} className="flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm">
+                  <div key={g.id} className="flex flex-wrap items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm">
                     <StatusBadge domain="goal" value={g.state} />
-                    <span className="min-w-0 flex-1 break-words">{g.text}</span>
+                    <span className="order-last min-w-0 basis-full break-words sm:order-none sm:basis-auto sm:flex-1">
+                      {g.text}
+                    </span>
                     {g.vulnclass && (
-                      <span className="bg-muted text-muted-foreground shrink-0 rounded px-1.5 py-0.5 text-xs">
+                      <span
+                        className="max-w-32 shrink-0 truncate rounded bg-muted px-1.5 py-0.5 text-muted-foreground text-xs"
+                        title={g.vulnclass}
+                      >
                         {g.vulnclass}
                       </span>
                     )}
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 shrink-0 px-1.5"
-                      disabled={goalBusy}
-                      onClick={() => startEditGoal(g)}
-                    >
-                      <PencilIcon className="size-3.5" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 shrink-0 px-1.5"
-                      disabled={goalBusy}
-                      onClick={() => void removeGoal(g)}
-                    >
-                      <Trash2Icon className="size-3.5 text-red-500" />
-                    </Button>
+                    <div className="ml-auto flex shrink-0 items-center gap-1">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="size-7 shrink-0"
+                            disabled={goalBusy}
+                            aria-label={g.state === "met" ? "恢复为进行中" : "标记完成"}
+                            onClick={() => void toggleGoalState(g)}
+                          >
+                            {g.state === "met" ? (
+                              <RotateCcwIcon className="size-3.5" />
+                            ) : (
+                              <CheckIcon className="size-3.5 text-emerald-500" />
+                            )}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{g.state === "met" ? "恢复为进行中" : "标记完成"}</TooltipContent>
+                      </Tooltip>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 shrink-0 px-1.5"
+                        disabled={goalBusy}
+                        onClick={() => startEditGoal(g)}
+                      >
+                        <PencilIcon className="size-3.5" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 shrink-0 px-1.5"
+                        disabled={goalBusy}
+                        onClick={() => void removeGoal(g)}
+                      >
+                        <Trash2Icon className="size-3.5 text-red-500" />
+                      </Button>
+                    </div>
                   </div>
                 ),
               )}

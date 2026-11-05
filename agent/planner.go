@@ -155,17 +155,19 @@ func renderPlannerTodos(items []actool.Todo) string {
 //	            single call (Goals = 本次新增的目标文本，1+ 条；set_goals 支持批量).
 //	"goal_deleted" — the human deleted a goal from 总览的目标管理 (Detail = 被删目标文本).
 //	"goal_edited"  — the human edited a goal from 总览的目标管理 (OldGoal→NewGoal 文本).
+//	"goal_state"   — the human completed or reopened a goal (Detail / GoalState).
 //	"cancelled" — the human deleted intent IntentID (Detail = 删除原因). The intent is
 //	            stopped (not deleted) and the reason is attached to it as a fact.
 type TriggerEvent struct {
-	Kind     string
-	IntentID int64
-	Detail   string
-	Summary  string   // Kind=="cancelled" 专用：删除前捕获的意图摘要（真删除后节点已不存在，无法再查）
-	Goals    []string // Kind=="goal" 专用：本次 set_goals 新增的目标文本（1 条或多条）
-	OldGoal  string   // Kind=="goal_edited" 专用：修改前的目标文本
-	NewGoal  string   // Kind=="goal_edited" 专用：修改后的目标文本
-	Hints    []string // Kind=="hint" 专用：本次 add_hint 新增的提示文本（1 条或多条）
+	Kind      string
+	IntentID  int64
+	Detail    string
+	Summary   string   // Kind=="cancelled" 专用：删除前捕获的意图摘要（真删除后节点已不存在，无法再查）
+	Goals     []string // Kind=="goal" 专用：本次 set_goals 新增的目标文本（1 条或多条）
+	OldGoal   string   // Kind=="goal_edited" 专用：修改前的目标文本
+	NewGoal   string   // Kind=="goal_edited" 专用：修改后的目标文本
+	Hints     []string // Kind=="hint" 专用：本次 add_hint 新增的提示文本（1 条或多条）
+	GoalState string   // Kind=="goal_state": open or met
 }
 
 // renderTriggers spells out the change(s) that fired this round: for a finished
@@ -196,6 +198,12 @@ func renderTriggers(ts *db.ExplorationStore, evs []TriggerEvent) string {
 			b.WriteString(fmt.Sprintf("\n- 人删除了该目标：%s —— 该目标已移除，请据此重判剩余目标/方向（不必再为它派意图）。", ev.Detail))
 		case "goal_edited":
 			b.WriteString(fmt.Sprintf("\n- 人修改了目标，由「%s」变为「%s」—— 请据新目标调整探索方向（原方向若已不适用请停派）。", ev.OldGoal, ev.NewGoal))
+		case "goal_state":
+			if ev.GoalState == "open" {
+				b.WriteString(fmt.Sprintf("\n- 人将目标「%s」恢复为进行中：此前的完成判定已撤回，请重新核验缺口并继续推进，不要仅凭旧的完成状态再次标记达成。", ev.Detail))
+			} else {
+				b.WriteString(fmt.Sprintf("\n- 人已将目标「%s」标记完成，请保留该状态，并据剩余未完成目标调整探索方向。", ev.Detail))
+			}
 		case "finding":
 			b.WriteString(fmt.Sprintf("\n- 意图 #%d（%s）的 worker 报告了一个 finding：%s", ev.IntentID, intentSummary(ts, ev.IntentID), ev.Detail))
 		case "cancelled":

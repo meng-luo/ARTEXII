@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
 )
 
@@ -60,6 +61,8 @@ func (s *Server) addGoal(w http.ResponseWriter, r *http.Request) {
 	if vc := strings.TrimSpace(body.VulnClass); vc != "" {
 		payload["vulnclass"] = vc
 	}
+	t.goalMu.Lock()
+	defer t.goalMu.Unlock()
 	id, err := t.Store.AddGoal(payload, "human")
 	if err != nil {
 		writeErr(w, 500, err.Error())
@@ -68,6 +71,7 @@ func (s *Server) addGoal(w http.ResponseWriter, r *http.Request) {
 	if of, _ := t.Store.OriginFactID(); of > 0 && id > 0 {
 		_ = t.Store.Link(of, db.RelSpawns, id) // goal descends from the task root (origin fact)
 	}
+	t.goalRevision.Add(1)
 	t.NotifyGoal([]string{text}) // 记「人新增了目标:…」触发并唤醒 planner
 	s.reviveTask(t)              // 把已完成/暂停的任务拉回运行态继续跑
 	node, _ := t.Store.GetNode(id)
@@ -110,6 +114,8 @@ func (s *Server) editGoal(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "目标内容不能为空")
 		return
 	}
+	t.goalMu.Lock()
+	defer t.goalMu.Unlock()
 	node, err := t.Store.GetNode(gid)
 	if err != nil {
 		writeErr(w, 500, err.Error())
@@ -124,6 +130,7 @@ func (s *Server) editGoal(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
+	t.goalRevision.Add(1)
 	t.NotifyGoalEdited(oldText, text) // 记「人修改了目标由 old 变为 new」触发并唤醒 planner
 	s.reviveTask(t)                   // 与新增一致:复活任务据新目标重判
 	updated, _ := t.Store.GetNode(gid)
@@ -153,6 +160,8 @@ func (s *Server) deleteGoal(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "bad goal id")
 		return
 	}
+	t.goalMu.Lock()
+	defer t.goalMu.Unlock()
 	node, err := t.Store.GetNode(gid)
 	if err != nil {
 		writeErr(w, 500, err.Error())
@@ -167,6 +176,80 @@ func (s *Server) deleteGoal(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
+	t.goalRevision.Add(1)
 	t.NotifyGoalDeleted(text) // 记「人删除了该目标:…」触发并唤醒 planner(不复活任务)
 	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+func (s *Server) setGoalState(w http.ResponseWriter, r *http.Request) {
+	t, ok := s.m.Task(r.PathValue("id"))
+	if !ok {
+		writeErr(w, http.StatusNotFound, "task not found")
+		return
+	}
+	if !s.engine.beginTaskOperation(t.ID) {
+		writeErr(w, http.StatusConflict, "任务正在删除,无法修改目标")
+		return
+	}
+	defer s.engine.decInflight(t.ID)
+	gid, err := strconv.ParseInt(r.PathValue("gid"), 10, 64)
+	if err != nil || gid <= 0 {
+		writeErr(w, http.StatusBadRequest, "bad goal id")
+		return
+	}
+	var body struct {
+		State string `json:"state"`
+	}
+	if err := decode(r, &body); err != nil || (body.State != "open" && body.State != "met") {
+		writeErr(w, http.StatusBadRequest, "目标状态只能是 open（进行中）或 met（已完成）")
+		return
+	}
+	t.goalMu.Lock()
+	defer t.goalMu.Unlock()
+	node, changed, err := t.Store.SetGoalState(gid, body.State)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if node == nil {
+		writeErr(w, http.StatusNotFound, "目标不存在")
+		return
+	}
+	if changed {
+		t.goalRevision.Add(1)
+		label := "完成"
+		if body.State == "open" {
+			label = "进行中"
+		}
+		s.engine.emitActivity(t, db.Activity{Worker: "system", Kind: "text", NodeID: &gid,
+			Summary: "用户将目标标记为" + label + "：" + goalDTO(node).Text})
+		t.NotifyGoalState(goalDTO(node).Text, body.State)
+	}
+	if body.State == "open" {
+		if changed || isTerminalStatus(t.lifecycleSnapshot().Status) {
+			if _, err := s.admitTask(t, "resume"); err != nil {
+				writeErr(w, http.StatusInternalServerError, "目标已恢复为进行中，但任务恢复失败："+err.Error())
+				return
+			}
+		}
+	} else {
+		allMet, err := t.Store.AllGoalsMet()
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if allMet {
+			won, err := s.m.SetTaskStatusGuarded(t.ID, "done")
+			if err != nil {
+				writeErr(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if won {
+				s.engine.cancelExec(t.ID, agent.AbortGoalMet)
+				s.engine.emitActivity(t, db.Activity{Worker: "system", Kind: "text",
+					Summary: "所有目标均已完成，任务结束"})
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, goalDTO(node))
 }
